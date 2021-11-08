@@ -92,11 +92,19 @@ import (
 	liquiditytypes "github.com/gravity-devs/liquidity/x/liquidity/types"
 	"github.com/rakyll/statik/fs"
 	"github.com/spf13/cast"
+	"github.com/tendermint/budget/x/budget"
+	"github.com/tendermint/farming/x/farming"
 	abci "github.com/tendermint/tendermint/abci/types"
 	tmjson "github.com/tendermint/tendermint/libs/json"
 	"github.com/tendermint/tendermint/libs/log"
 	tmos "github.com/tendermint/tendermint/libs/os"
 	dbm "github.com/tendermint/tm-db"
+
+	budgetkeeper "github.com/tendermint/budget/x/budget/keeper"
+	budgettypes "github.com/tendermint/budget/x/budget/types"
+
+	farmingkeeper "github.com/tendermint/farming/x/farming/keeper"
+	farmingtypes "github.com/tendermint/farming/x/farming/types"
 
 	gaiaappparams "github.com/cosmos/gaia/v6/app/params"
 	"github.com/strangelove-ventures/packet-forward-middleware/router"
@@ -144,6 +152,8 @@ var (
 		transfer.AppModuleBasic{},
 		vesting.AppModuleBasic{},
 		liquidity.AppModuleBasic{},
+		budget.AppModuleBasic{},
+		farming.AppModuleBasic{},
 		router.AppModuleBasic{},
 	)
 
@@ -157,6 +167,8 @@ var (
 		govtypes.ModuleName:            {authtypes.Burner},
 		liquiditytypes.ModuleName:      {authtypes.Minter, authtypes.Burner},
 		ibctransfertypes.ModuleName:    {authtypes.Minter, authtypes.Burner},
+		budgettypes.ModuleName:         nil,
+		farmingtypes.ModuleName:        nil,
 	}
 )
 
@@ -199,6 +211,8 @@ type GaiaApp struct { // nolint: golint
 	FeeGrantKeeper   feegrantkeeper.Keeper
 	AuthzKeeper      authzkeeper.Keeper
 	LiquidityKeeper  liquiditykeeper.Keeper
+	BudgetKeeper     budgetkeeper.Keeper
+	FarmingKeeper    farmingkeeper.Keeper
 	RouterKeeper     routerkeeper.Keeper
 
 	// make scoped keepers public for test purposes
@@ -249,7 +263,7 @@ func NewGaiaApp(
 		minttypes.StoreKey, distrtypes.StoreKey, slashingtypes.StoreKey,
 		govtypes.StoreKey, paramstypes.StoreKey, ibchost.StoreKey, upgradetypes.StoreKey,
 		evidencetypes.StoreKey, liquiditytypes.StoreKey, ibctransfertypes.StoreKey,
-		capabilitytypes.StoreKey, feegrant.StoreKey, authzkeeper.StoreKey, routertypes.StoreKey,
+		capabilitytypes.StoreKey, feegrant.StoreKey, authzkeeper.StoreKey, budgettypes.StoreKey, farmingtypes.StoreKey, routertypes.StoreKey,
 	)
 	tkeys := sdk.NewTransientStoreKeys(paramstypes.TStoreKey)
 	memKeys := sdk.NewMemoryStoreKeys(capabilitytypes.MemStoreKey)
@@ -361,6 +375,14 @@ func NewGaiaApp(
 		app.AccountKeeper,
 		app.DistrKeeper,
 	)
+	app.BudgetKeeper = budgetkeeper.NewKeeper(
+		appCodec, keys[budgettypes.StoreKey], app.GetSubspace(budgettypes.ModuleName), app.AccountKeeper,
+		app.BankKeeper, app.ModuleAccountAddrs(),
+	)
+	app.FarmingKeeper = farmingkeeper.NewKeeper(
+		appCodec, keys[farmingtypes.StoreKey], app.GetSubspace(farmingtypes.ModuleName), app.AccountKeeper,
+		app.BankKeeper, app.ModuleAccountAddrs(),
+	)
 
 	// register the staking hooks
 	// NOTE: stakingKeeper above is passed by reference, so that it will contain these hooks
@@ -445,6 +467,7 @@ func NewGaiaApp(
 		gov.NewAppModule(appCodec, app.GovKeeper, app.AccountKeeper, app.BankKeeper),
 		mint.NewAppModule(appCodec, app.MintKeeper, app.AccountKeeper),
 		slashing.NewAppModule(appCodec, app.SlashingKeeper, app.AccountKeeper, app.BankKeeper, app.StakingKeeper),
+		budget.NewAppModule(appCodec, app.BudgetKeeper, app.AccountKeeper, app.BankKeeper),
 		distr.NewAppModule(appCodec, app.DistrKeeper, app.AccountKeeper, app.BankKeeper, app.StakingKeeper),
 		staking.NewAppModule(appCodec, app.StakingKeeper, app.AccountKeeper, app.BankKeeper),
 		upgrade.NewAppModule(app.UpgradeKeeper),
@@ -454,6 +477,7 @@ func NewGaiaApp(
 		ibc.NewAppModule(app.IBCKeeper),
 		params.NewAppModule(app.ParamsKeeper),
 		liquidity.NewAppModule(appCodec, app.LiquidityKeeper, app.AccountKeeper, app.BankKeeper, app.DistrKeeper),
+		farming.NewAppModule(appCodec, app.FarmingKeeper, app.AccountKeeper, app.BankKeeper),
 		transferModule,
 		routerModule,
 	)
@@ -466,6 +490,7 @@ func NewGaiaApp(
 		upgradetypes.ModuleName,
 		capabilitytypes.ModuleName,
 		minttypes.ModuleName,
+		budgettypes.ModuleName,
 		distrtypes.ModuleName,
 		slashingtypes.ModuleName,
 		evidencetypes.ModuleName,
@@ -479,6 +504,7 @@ func NewGaiaApp(
 		govtypes.ModuleName,
 		stakingtypes.ModuleName,
 		liquiditytypes.ModuleName,
+		farmingtypes.ModuleName,
 		feegrant.ModuleName,
 		authz.ModuleName,
 	)
@@ -505,6 +531,8 @@ func NewGaiaApp(
 		ibctransfertypes.ModuleName,
 		feegrant.ModuleName,
 		authz.ModuleName,
+		budgettypes.ModuleName,
+		farmingtypes.ModuleName,
 		routertypes.ModuleName,
 	)
 
@@ -526,6 +554,8 @@ func NewGaiaApp(
 		authzmodule.NewAppModule(appCodec, app.AuthzKeeper, app.AccountKeeper, app.BankKeeper, app.interfaceRegistry),
 		gov.NewAppModule(appCodec, app.GovKeeper, app.AccountKeeper, app.BankKeeper),
 		mint.NewAppModule(appCodec, app.MintKeeper, app.AccountKeeper),
+		budget.NewAppModule(appCodec, app.BudgetKeeper, app.AccountKeeper, app.BankKeeper),
+		farming.NewAppModule(appCodec, app.FarmingKeeper, app.AccountKeeper, app.BankKeeper),
 		staking.NewAppModule(appCodec, app.StakingKeeper, app.AccountKeeper, app.BankKeeper),
 		distr.NewAppModule(appCodec, app.DistrKeeper, app.AccountKeeper, app.BankKeeper, app.StakingKeeper),
 		slashing.NewAppModule(appCodec, app.SlashingKeeper, app.AccountKeeper, app.BankKeeper, app.StakingKeeper),
@@ -577,6 +607,8 @@ func NewGaiaApp(
 			fromVM[authz.ModuleName] = 0
 			fromVM[feegrant.ModuleName] = 0
 			fromVM[routertypes.ModuleName] = 0
+			fromVM[budgettypes.ModuleName] = 0
+			fromVM[farmingtypes.ModuleName] = 0
 
 			return app.mm.RunMigrations(ctx, app.configurator, fromVM)
 		},
@@ -589,7 +621,7 @@ func NewGaiaApp(
 
 	if upgradeInfo.Name == upgradeName && !app.UpgradeKeeper.IsSkipHeight(upgradeInfo.Height) {
 		storeUpgrades := store.StoreUpgrades{
-			Added: []string{authz.ModuleName, feegrant.ModuleName, routertypes.ModuleName},
+			Added: []string{authz.ModuleName, feegrant.ModuleName, routertypes.ModuleName, budgettypes.ModuleName, farmingtypes.ModuleName},
 		}
 
 		// configure store loader that checks if version == upgradeHeight and applies store upgrades
@@ -768,6 +800,8 @@ func initParamsKeeper(appCodec codec.BinaryCodec, legacyAmino *codec.LegacyAmino
 	paramsKeeper.Subspace(govtypes.ModuleName).WithKeyTable(govtypes.ParamKeyTable())
 	paramsKeeper.Subspace(crisistypes.ModuleName)
 	paramsKeeper.Subspace(liquiditytypes.ModuleName)
+	paramsKeeper.Subspace(farmingtypes.ModuleName)
+	paramsKeeper.Subspace(budgettypes.ModuleName)
 	paramsKeeper.Subspace(ibctransfertypes.ModuleName)
 	paramsKeeper.Subspace(ibchost.ModuleName)
 	paramsKeeper.Subspace(routertypes.ModuleName).WithKeyTable(routertypes.ParamKeyTable())

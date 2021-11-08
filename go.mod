@@ -12,6 +12,8 @@ require (
 	github.com/spf13/cobra v1.2.1
 	github.com/strangelove-ventures/packet-forward-middleware v1.0.0
 	github.com/stretchr/testify v1.7.0
+	github.com/tendermint/budget v0.1.1
+	github.com/tendermint/farming v0.1.2
 	github.com/tendermint/tendermint v0.34.13
 	github.com/tendermint/tm-db v0.6.4
 )
